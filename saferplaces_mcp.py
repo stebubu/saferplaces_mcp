@@ -24,6 +24,12 @@ from fastmcp import FastMCP
 BASE_URL = "https://api.saferplaces.co"
 OPENAPI_URL = f"{BASE_URL}/openapi?f=json"
 
+# Copia locale dello spec, usata come fallback quando l'ambiente di build/
+# deploy (es. FastMCP Cloud) non ha accesso di rete in uscita durante
+# l'introspezione del server. Rigenerala con:
+#   curl -s "https://api.saferplaces.co/openapi?f=json" -o openapi.json
+OPENAPI_LOCAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openapi.json")
+
 USER = os.environ.get("SAFERPLACES_USER")
 TOKEN = os.environ.get("SAFERPLACES_TOKEN")
 if not USER or not TOKEN:
@@ -84,8 +90,17 @@ def build_server() -> FastMCP:
         event_hooks={"request": [inject_credentials]},
     )
 
-    # Scarica la specifica OpenAPI e genera i tool automaticamente.
-    spec = httpx.get(OPENAPI_URL, timeout=30.0).json()
+    # Prova prima la copia locale (nessuna dipendenza dalla rete in fase di
+    # build/inspect), poi scarica dal server se non presente o non valida.
+    spec = None
+    if os.path.exists(OPENAPI_LOCAL_PATH):
+        try:
+            with open(OPENAPI_LOCAL_PATH, "r", encoding="utf-8") as f:
+                spec = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            spec = None
+    if spec is None:
+        spec = httpx.get(OPENAPI_URL, timeout=30.0).json()
 
     mcp = FastMCP.from_openapi(
         openapi_spec=spec,
