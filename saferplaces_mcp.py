@@ -27,9 +27,14 @@ OPENAPI_URL = f"{BASE_URL}/openapi?f=json"
 USER = os.environ.get("SAFERPLACES_USER")
 TOKEN = os.environ.get("SAFERPLACES_TOKEN")
 if not USER or not TOKEN:
-    raise RuntimeError(
-        "Imposta le variabili d'ambiente SAFERPLACES_USER e SAFERPLACES_TOKEN "
-        "prima di avviare il server."
+    # Non solleviamo un'eccezione qui: alcuni ambienti di deploy (es.
+    # FastMCP Cloud) importano il modulo in fase di build, prima che le
+    # variabili d'ambiente/secret siano disponibili. La verifica vera e
+    # propria avviene nell'hook inject_credentials, al momento della
+    # richiesta effettiva.
+    print(
+        "ATTENZIONE: SAFERPLACES_USER e/o SAFERPLACES_TOKEN non impostate. "
+        "Le richieste verso l'API falliranno finché non le configuri.",
     )
 
 # Nomi dei campi del body in cui l'API si aspetta le credenziali.
@@ -46,6 +51,11 @@ async def inject_credentials(request: httpx.Request) -> None:
     """Hook httpx: inietta user e token nel body JSON di ogni POST/PUT/PATCH."""
     if request.method not in ("POST", "PUT", "PATCH"):
         return
+    if not USER or not TOKEN:
+        raise RuntimeError(
+            "Imposta le variabili d'ambiente SAFERPLACES_USER e SAFERPLACES_TOKEN "
+            "prima di effettuare richieste."
+        )
     try:
         body = json.loads(request.content.decode("utf-8")) if request.content else {}
     except (json.JSONDecodeError, UnicodeDecodeError):
