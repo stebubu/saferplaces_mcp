@@ -24,10 +24,12 @@ from fastmcp import FastMCP
 BASE_URL = "https://api.saferplaces.co"
 OPENAPI_URL = f"{BASE_URL}/openapi?f=json"
 
-# Copia locale dello spec, usata come fallback quando l'ambiente di build/
-# deploy (es. FastMCP Cloud) non ha accesso di rete in uscita durante
-# l'introspezione del server. Rigenerala con:
-#   curl -s "https://api.saferplaces.co/openapi?f=json" -o openapi.json
+# Copia locale dello spec, con tutti i $ref esterni risolti/inlineati
+# ("bundled"). Serve perché: (a) l'ambiente di build di FastMCP Cloud non
+# ha accesso di rete in uscita durante l'introspezione del server, e (b) il
+# parser OpenAPI usato da fastmcp non supporta comunque riferimenti esterni
+# (es. verso schemas.opengis.net o api.saferplaces.co/schemas/...), solo
+# quelli locali ("#/..."). Rigenerala con tools/bundle_openapi.py.
 OPENAPI_LOCAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openapi.json")
 
 USER = os.environ.get("SAFERPLACES_USER")
