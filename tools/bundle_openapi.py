@@ -56,38 +56,41 @@ def bundle(root):
         if isinstance(node, dict):
             ref = node.get("$ref")
             if isinstance(ref, str):
-                if ref.startswith("http://") or ref.startswith("https://"):
-                    url, _, frag = ref.partition("#")
-                    key = (url, frag)
-                    if key in stack:
-                        return {"$ref": ref}  # riferimento circolare: best effort
-                    if key in resolved_cache:
-                        return resolved_cache[key]
-                    target_doc = get_doc(url)
-                    target = navigate(target_doc, frag)
-                    result = resolve_node(copy.deepcopy(target), target_doc, url, False, stack | {key})
-                    resolved_cache[key] = result
-                    return result
-                if ref.startswith("#") and not is_root:
+                if ref.startswith("#"):
+                    if is_root:
+                        # ref locale nel documento radice: lascialo invariato
+                        return node
                     # ref locale dentro un documento esterno: risolvi in quel documento
                     frag = ref[1:]
                     key = (base_url, frag)
                     if key in stack:
-                        return {"$ref": ref}
+                        return {"$ref": ref}  # riferimento circolare: best effort
                     if key in resolved_cache:
                         return resolved_cache[key]
                     target = navigate(doc, frag)
                     result = resolve_node(copy.deepcopy(target), doc, base_url, False, stack | {key})
                     resolved_cache[key] = result
                     return result
-                # ref locale nel documento radice: lascialo invariato
-                return node
+                # ref assoluto (http/https) o relativo (../foo.yaml, ecc.):
+                # risolvilo rispetto al documento corrente e inlinealo.
+                absolute = urllib.parse.urljoin(base_url, ref) if base_url else ref
+                url, _, frag = absolute.partition("#")
+                key = (url, frag)
+                if key in stack:
+                    return {"$ref": ref}
+                if key in resolved_cache:
+                    return resolved_cache[key]
+                target_doc = get_doc(url)
+                target = navigate(target_doc, frag)
+                result = resolve_node(copy.deepcopy(target), target_doc, url, False, stack | {key})
+                resolved_cache[key] = result
+                return result
             return {k: resolve_node(v, doc, base_url, is_root, stack) for k, v in node.items()}
         if isinstance(node, list):
             return [resolve_node(v, doc, base_url, is_root, stack) for v in node]
         return node
 
-    return resolve_node(root, root, None, True, frozenset())
+    return resolve_node(root, root, SPEC_URL, True, frozenset())
 
 
 def main():
