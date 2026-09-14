@@ -1,0 +1,12 @@
+# Ambienti Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Credenziali e configurazioni locali
+.env
+*.env
+
+# File di sistema
+.DS_Store
