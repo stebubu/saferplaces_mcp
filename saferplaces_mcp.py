@@ -55,6 +55,26 @@ TOKEN_FIELD = "token"
 CREDENTIALS_INSIDE_INPUTS = True
 
 
+def _as_json_object(value):
+    """Se `value` è una stringa JSON che rappresenta un oggetto, la deserializza.
+
+    FastMCP, generando il client da uno schema OpenAPI con `inputs` fortemente
+    annidato (molti `oneOf`), a volte finisce per serializzare il body (o il
+    campo "inputs") due volte, producendo una stringa JSON al posto
+    dell'oggetto atteso. Qui si prova a "spacchettarla"; se non è possibile o
+    il risultato non è comunque un dict, si ritorna None.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return None
+
+
 async def inject_credentials(request: httpx.Request) -> None:
     """Hook httpx: inietta user e token nel body JSON di ogni POST/PUT/PATCH."""
     if request.method not in ("POST", "PUT", "PATCH"):
@@ -64,15 +84,28 @@ async def inject_credentials(request: httpx.Request) -> None:
             "Imposta le variabili d'ambiente SAFERPLACES_USER e SAFERPLACES_TOKEN "
             "prima di effettuare richieste."
         )
+    if not request.content:
+        return
     try:
-        body = json.loads(request.content.decode("utf-8")) if request.content else {}
+        raw_body = json.loads(request.content.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         return  # body non-JSON: non tocchiamo nulla
 
+    body = _as_json_object(raw_body)
+    if body is None:
+        # Il body non è (e non si riduce a) un oggetto JSON: non sappiamo dove
+        # iniettare le credenziali. Meglio lasciare la richiesta invariata
+        # (l'API risponderà con un errore leggibile) che sollevare un
+        # AttributeError qui dentro.
+        return
+
     target = body
     if CREDENTIALS_INSIDE_INPUTS:
-        body.setdefault("inputs", {})
-        target = body["inputs"]
+        inputs = _as_json_object(body.get("inputs"))
+        if inputs is None:
+            inputs = {}
+        body["inputs"] = inputs
+        target = inputs
 
     target.setdefault(USER_FIELD, USER)
     target.setdefault(TOKEN_FIELD, TOKEN)
