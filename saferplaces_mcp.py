@@ -75,6 +75,20 @@ def _as_json_object(value):
     return None
 
 
+async def request_async_execution(request: httpx.Request) -> None:
+    """Hook httpx: chiede esecuzione asincrona sugli endpoint .../execution.
+
+    I processi (digital-twin-process, safer-rain-process, ...) possono
+    impiegare più tempo del timeout del trasporto MCP se eseguiti in modo
+    sincrono (comportamento di default OGC API Processes senza questo
+    header). Con `Prefer: respond-async` l'API risponde subito con lo stato
+    del job (in genere HTTP 201 + jobID), da monitorare poi con i tool
+    `getJob`/`getJobResults`.
+    """
+    if request.method == "POST" and request.url.path.endswith("/execution"):
+        request.headers["Prefer"] = "respond-async"
+
+
 async def inject_credentials(request: httpx.Request) -> None:
     """Hook httpx: inietta user e token nel body JSON di ogni POST/PUT/PATCH."""
     if request.method not in ("POST", "PUT", "PATCH"):
@@ -128,7 +142,7 @@ def build_server() -> FastMCP:
     client = httpx.AsyncClient(
         base_url=BASE_URL,
         timeout=httpx.Timeout(300.0, connect=15.0),
-        event_hooks={"request": [inject_credentials]},
+        event_hooks={"request": [request_async_execution, inject_credentials]},
     )
 
     # Prova prima la copia locale (nessuna dipendenza dalla rete in fase di
