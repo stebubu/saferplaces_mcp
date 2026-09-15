@@ -112,6 +112,12 @@ async def inject_credentials(request: httpx.Request) -> None:
 
     new_content = json.dumps(body).encode("utf-8")
     request._content = new_content
+    # Impostare solo `_content` non basta: httpx invia i byte dallo `stream`
+    # della request, che resterebbe quello originale (più corto) mentre
+    # l'header Content-Length rifletterebbe la nuova lunghezza, causando
+    # "Too little data for declared Content-Length". Bisogna risincronizzare
+    # anche lo stream, come da pattern documentato per gli event hook httpx.
+    request.stream = httpx._content.ByteStream(new_content)
     request.headers["Content-Length"] = str(len(new_content))
     request.headers["Content-Type"] = "application/json"
 
