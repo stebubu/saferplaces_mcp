@@ -132,25 +132,25 @@ async def process_describe(
 @mcp.tool
 async def process_execute(
     process_id: ProcessId,
-    inputs: dict[str, Any],
+    params: dict[str, Any],
     async_execution: bool = True,
 ) -> dict:
-    """Lancia un processo SaferPlaces. `inputs` è il dizionario dei parametri
-    (vedi process_describe): NON includere user e token, li aggiunge il
-    server. Con async_execution=True (default) la risposta contiene l'id
-    del job da monitorare con job_status; con False attende e restituisce
-    direttamente il risultato (solo per esecuzioni brevi)."""
+    """Lancia un processo SaferPlaces. `params` è il dizionario dei parametri
+    del processo (vedi process_describe): NON includere user e token, li
+    aggiunge il server. Con async_execution=True (default) la risposta
+    contiene l'id del job da monitorare con job_status; con False attende e
+    restituisce direttamente il risultato (solo per esecuzioni brevi)."""
     headers = {"Prefer": "respond-async"} if async_execution else {}
     try:
         r = await client.post(
             f"/processes/{process_id}/execution",
-            json={"inputs": inputs},
+            json={"inputs": params},
             headers=headers,
         )
     except Exception as exc:
         raise RuntimeError(
-            f"process_execute({process_id!r}) fallita: tipo(inputs)={type(inputs).__name__}, "
-            f"chiavi={list(inputs.keys()) if isinstance(inputs, dict) else inputs!r} — "
+            f"process_execute({process_id!r}) fallita: tipo(params)={type(params).__name__}, "
+            f"chiavi={list(params.keys()) if isinstance(params, dict) else params!r} — "
             f"{type(exc).__name__}: {exc}"
         ) from exc
     r.raise_for_status()
@@ -190,7 +190,7 @@ async def list_jobs(limit: int = 10) -> dict:
 @mcp.tool
 async def process_run_and_wait(
     process_id: ProcessId,
-    inputs: dict[str, Any],
+    params: dict[str, Any],
     poll_seconds: int = 15,
     timeout_seconds: int = 1800,
 ) -> dict:
@@ -198,7 +198,7 @@ async def process_run_and_wait(
     stato ogni `poll_seconds`. Restituisce i risultati del job (o lo stato
     di errore). Usa process_execute + job_status se preferisci gestire
     l'attesa manualmente."""
-    started = await process_execute.fn(process_id, inputs, async_execution=True)
+    started = await process_execute.fn(process_id, params, async_execution=True)
     job_id = started.get("jobID") or started.get("job_id") or started.get("id")
     if not job_id and started.get("job_location"):
         job_id = started["job_location"].rstrip("/").split("/")[-1]
