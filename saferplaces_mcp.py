@@ -80,6 +80,7 @@ async def inject_credentials(request: httpx.Request) -> None:
 
     new_content = json.dumps(body).encode("utf-8")
     request._content = new_content
+    request.stream = httpx.ByteStream(new_content)
     request.headers["Content-Length"] = str(len(new_content))
     request.headers["Content-Type"] = "application/json"
 
