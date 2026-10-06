@@ -39,11 +39,13 @@ PROCESS_IDS = [
     "untrim-process",
     "digital-twin-process",
     "terra-twin-process",
+    "safer-coast-process",
 ]
 ProcessId = Literal[
     "untrim-process",
     "digital-twin-process",
     "terra-twin-process",
+    "safer-coast-process",
 ]
 
 USER = os.environ.get("SAFERPLACES_USER")
