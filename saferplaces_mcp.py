@@ -70,9 +70,21 @@ async def inject_credentials(request: httpx.Request) -> None:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return  # body non-JSON: non tocchiamo nulla
 
+    if not isinstance(body, dict):
+        raise RuntimeError(
+            f"inject_credentials: body della richiesta non è un oggetto JSON "
+            f"(tipo={type(body).__name__}, contenuto={body!r})"
+        )
+
     target = body
     if CREDENTIALS_INSIDE_INPUTS:
-        body.setdefault("inputs", {})
+        if "inputs" not in body:
+            body["inputs"] = {}
+        elif not isinstance(body["inputs"], dict):
+            raise RuntimeError(
+                f"inject_credentials: 'inputs' non è un oggetto JSON "
+                f"(tipo={type(body['inputs']).__name__}, contenuto={body['inputs']!r})"
+            )
         target = body["inputs"]
 
     target.setdefault(USER_FIELD, USER)
