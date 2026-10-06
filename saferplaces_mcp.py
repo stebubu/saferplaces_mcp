@@ -1,9 +1,17 @@
 """
-Server MCP per le REST API di SaferPlaces (api.saferplaces.co)
-==============================================================
+Server MCP per SaferPlaces — processi di simulazione (api.saferplaces.co)
+=========================================================================
 
-Genera automaticamente i tool MCP a partire dalla specifica OpenAPI
-e inietta le credenziali (user + token) nel body di ogni richiesta POST.
+Espone come tool MCP i processi SaferPlaces (OGC API Processes):
+descrizione, esecuzione delle simulazioni (sincrona o asincrona),
+stato dei job e risultati. Le credenziali (user + token) vengono
+iniettate nel body di ogni richiesta di esecuzione: non passano mai
+per la chat.
+
+Processi supportati (descrizioni lette live dal server, f=json|jsonld):
+    https://api.saferplaces.co/processes/untrim-process
+    https://api.saferplaces.co/processes/digital-twin-process
+    https://api.saferplaces.co/processes/terra-twin-process
 
 Requisiti:
     pip install fastmcp httpx
@@ -18,156 +26,177 @@ Avvio manuale (per test):
 
 import os
 import json
+import asyncio
 import httpx
+from typing import Any, Literal
 from fastmcp import FastMCP
 
 BASE_URL = "https://api.saferplaces.co"
-OPENAPI_URL = f"{BASE_URL}/openapi?f=json"
 
-# Copia locale dello spec, con tutti i $ref esterni risolti/inlineati
-# ("bundled"). Serve perché: (a) l'ambiente di build di FastMCP Cloud non
-# ha accesso di rete in uscita durante l'introspezione del server, e (b) il
-# parser OpenAPI usato da fastmcp non supporta comunque riferimenti esterni
-# (es. verso schemas.opengis.net o api.saferplaces.co/schemas/...), solo
-# quelli locali ("#/..."). Rigenerala con tools/bundle_openapi.py.
-OPENAPI_LOCAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "openapi.json")
+# Processi esposti dal server. Per aggiungerne uno basta inserire qui
+# il suo id (come appare in /processes) e aggiornare il Literal sotto.
+PROCESS_IDS = [
+    "untrim-process",
+    "digital-twin-process",
+    "terra-twin-process",
+]
+ProcessId = Literal[
+    "untrim-process",
+    "digital-twin-process",
+    "terra-twin-process",
+]
 
 USER = os.environ.get("SAFERPLACES_USER")
 TOKEN = os.environ.get("SAFERPLACES_TOKEN")
 if not USER or not TOKEN:
-    # Non solleviamo un'eccezione qui: alcuni ambienti di deploy (es.
-    # FastMCP Cloud) importano il modulo in fase di build, prima che le
-    # variabili d'ambiente/secret siano disponibili. La verifica vera e
-    # propria avviene nell'hook inject_credentials, al momento della
-    # richiesta effettiva.
-    print(
-        "ATTENZIONE: SAFERPLACES_USER e/o SAFERPLACES_TOKEN non impostate. "
-        "Le richieste verso l'API falliranno finché non le configuri.",
+    raise RuntimeError(
+        "Imposta le variabili d'ambiente SAFERPLACES_USER e SAFERPLACES_TOKEN "
+        "prima di avviare il server."
     )
 
-# Nomi dei campi del body in cui l'API si aspetta le credenziali.
-# ADATTA se la documentazione usa nomi diversi (es. "username", "token_user").
+# Nomi dei campi delle credenziali nel body (verificati sulla descrizione
+# live dei processi: vanno dentro "inputs").
 USER_FIELD = "user"
 TOKEN_FIELD = "token"
-
-# Se le credenziali vanno annidate dentro "inputs" (tipico di OGC API
-# Processes, dove il body è {"inputs": {...}}), lascia True.
 CREDENTIALS_INSIDE_INPUTS = True
-
-
-def _as_json_object(value):
-    """Se `value` è una stringa JSON che rappresenta un oggetto, la deserializza.
-
-    FastMCP, generando il client da uno schema OpenAPI con `inputs` fortemente
-    annidato (molti `oneOf`), a volte finisce per serializzare il body (o il
-    campo "inputs") due volte, producendo una stringa JSON al posto
-    dell'oggetto atteso. Qui si prova a "spacchettarla"; se non è possibile o
-    il risultato non è comunque un dict, si ritorna None.
-    """
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return None
-        return parsed if isinstance(parsed, dict) else None
-    return None
-
-
-async def request_async_execution(request: httpx.Request) -> None:
-    """Hook httpx: chiede esecuzione asincrona sugli endpoint .../execution.
-
-    I processi (digital-twin-process, safer-rain-process, ...) possono
-    impiegare più tempo del timeout del trasporto MCP se eseguiti in modo
-    sincrono (comportamento di default OGC API Processes senza questo
-    header). Con `Prefer: respond-async` l'API risponde subito con lo stato
-    del job (in genere HTTP 201 + jobID), da monitorare poi con i tool
-    `getJob`/`getJobResults`.
-    """
-    if request.method == "POST" and request.url.path.endswith("/execution"):
-        request.headers["Prefer"] = "respond-async"
 
 
 async def inject_credentials(request: httpx.Request) -> None:
     """Hook httpx: inietta user e token nel body JSON di ogni POST/PUT/PATCH."""
     if request.method not in ("POST", "PUT", "PATCH"):
         return
-    if not USER or not TOKEN:
-        raise RuntimeError(
-            "Imposta le variabili d'ambiente SAFERPLACES_USER e SAFERPLACES_TOKEN "
-            "prima di effettuare richieste."
-        )
-    if not request.content:
-        return
     try:
-        raw_body = json.loads(request.content.decode("utf-8"))
+        body = json.loads(request.content.decode("utf-8")) if request.content else {}
     except (json.JSONDecodeError, UnicodeDecodeError):
         return  # body non-JSON: non tocchiamo nulla
 
-    body = _as_json_object(raw_body)
-    if body is None:
-        # Il body non è (e non si riduce a) un oggetto JSON: non sappiamo dove
-        # iniettare le credenziali. Meglio lasciare la richiesta invariata
-        # (l'API risponderà con un errore leggibile) che sollevare un
-        # AttributeError qui dentro.
-        return
-
     target = body
     if CREDENTIALS_INSIDE_INPUTS:
-        inputs = _as_json_object(body.get("inputs"))
-        if inputs is None:
-            inputs = {}
-        body["inputs"] = inputs
-        target = inputs
+        body.setdefault("inputs", {})
+        target = body["inputs"]
 
     target.setdefault(USER_FIELD, USER)
     target.setdefault(TOKEN_FIELD, TOKEN)
 
     new_content = json.dumps(body).encode("utf-8")
     request._content = new_content
-    # Impostare solo `_content` non basta: httpx invia i byte dallo `stream`
-    # della request, che resterebbe quello originale (più corto) mentre
-    # l'header Content-Length rifletterebbe la nuova lunghezza, causando
-    # "Too little data for declared Content-Length". Bisogna risincronizzare
-    # anche lo stream, come da pattern documentato per gli event hook httpx.
-    request.stream = httpx._content.ByteStream(new_content)
     request.headers["Content-Length"] = str(len(new_content))
     request.headers["Content-Type"] = "application/json"
 
 
-def build_server() -> FastMCP:
-    # Client HTTP con l'hook di autenticazione e timeout generosi
-    # (le simulazioni possono richiedere tempo).
-    client = httpx.AsyncClient(
-        base_url=BASE_URL,
-        timeout=httpx.Timeout(300.0, connect=15.0),
-        event_hooks={"request": [request_async_execution, inject_credentials]},
+client = httpx.AsyncClient(
+    base_url=BASE_URL,
+    timeout=httpx.Timeout(300.0, connect=15.0),
+    event_hooks={"request": [inject_credentials]},
+)
+
+mcp = FastMCP(name="SaferPlaces")
+
+
+@mcp.tool
+async def list_processes() -> dict:
+    """Elenco dei processi di simulazione disponibili sull'API SaferPlaces,
+    con id e descrizione sintetica."""
+    r = await client.get("/processes", params={"f": "json"})
+    r.raise_for_status()
+    return r.json()
+
+
+@mcp.tool
+async def process_describe(
+    process_id: ProcessId,
+    format: Literal["json", "jsonld"] = "json",
+) -> dict:
+    """Descrizione completa di un processo: titolo, input attesi (con tipi,
+    default e obbligatorietà) e output prodotti. Chiamalo PRIMA di eseguire
+    una simulazione per conoscere i parametri richiesti.
+    `format`: "json" (default) oppure "jsonld" (versione JSON-LD)."""
+    r = await client.get(f"/processes/{process_id}", params={"f": format})
+    r.raise_for_status()
+    return r.json()
+
+
+@mcp.tool
+async def process_execute(
+    process_id: ProcessId,
+    inputs: dict[str, Any],
+    async_execution: bool = True,
+) -> dict:
+    """Lancia un processo SaferPlaces. `inputs` è il dizionario dei parametri
+    (vedi process_describe): NON includere user e token, li aggiunge il
+    server. Con async_execution=True (default) la risposta contiene l'id
+    del job da monitorare con job_status; con False attende e restituisce
+    direttamente il risultato (solo per esecuzioni brevi)."""
+    headers = {"Prefer": "respond-async"} if async_execution else {}
+    r = await client.post(
+        f"/processes/{process_id}/execution",
+        json={"inputs": inputs},
+        headers=headers,
     )
-
-    # Prova prima la copia locale (nessuna dipendenza dalla rete in fase di
-    # build/inspect), poi scarica dal server se non presente o non valida.
-    spec = None
-    if os.path.exists(OPENAPI_LOCAL_PATH):
-        try:
-            with open(OPENAPI_LOCAL_PATH, "r", encoding="utf-8") as f:
-                spec = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            spec = None
-    if spec is None:
-        spec = httpx.get(OPENAPI_URL, timeout=30.0).json()
-
-    mcp = FastMCP.from_openapi(
-        openapi_spec=spec,
-        client=client,
-        name="SaferPlaces",
-    )
-    return mcp
+    r.raise_for_status()
+    out: dict = r.json() if r.content else {}
+    location = r.headers.get("Location")
+    if location:
+        out.setdefault("job_location", location)
+    return out
 
 
-# Istanza a livello di modulo: necessaria per i deploy cloud (es. FastMCP
-# Cloud) che importano l'oggetto `mcp` direttamente da questo file.
-mcp = build_server()
+@mcp.tool
+async def job_status(job_id: str) -> dict:
+    """Stato di un job di simulazione (accepted / running / successful /
+    failed) con eventuale avanzamento."""
+    r = await client.get(f"/jobs/{job_id}", params={"f": "json"})
+    r.raise_for_status()
+    return r.json()
+
+
+@mcp.tool
+async def job_results(job_id: str) -> dict:
+    """Risultati di un job completato (output della simulazione, URI S3
+    dei file prodotti)."""
+    r = await client.get(f"/jobs/{job_id}/results", params={"f": "json"})
+    r.raise_for_status()
+    return r.json()
+
+
+@mcp.tool
+async def list_jobs(limit: int = 10) -> dict:
+    """Elenco dei job recenti sull'API, con stato e id."""
+    r = await client.get("/jobs", params={"limit": limit, "f": "json"})
+    r.raise_for_status()
+    return r.json()
+
+
+@mcp.tool
+async def process_run_and_wait(
+    process_id: ProcessId,
+    inputs: dict[str, Any],
+    poll_seconds: int = 15,
+    timeout_seconds: int = 1800,
+) -> dict:
+    """Lancia un processo e attende il completamento, facendo polling dello
+    stato ogni `poll_seconds`. Restituisce i risultati del job (o lo stato
+    di errore). Usa process_execute + job_status se preferisci gestire
+    l'attesa manualmente."""
+    started = await process_execute.fn(process_id, inputs, async_execution=True)
+    job_id = started.get("jobID") or started.get("job_id") or started.get("id")
+    if not job_id and started.get("job_location"):
+        job_id = started["job_location"].rstrip("/").split("/")[-1]
+    if not job_id:
+        return {"error": "Nessun job id nella risposta di esecuzione", "response": started}
+
+    waited = 0
+    while waited < timeout_seconds:
+        status = await job_status.fn(job_id)
+        state = str(status.get("status", "")).lower()
+        if state in ("successful", "succeeded", "failed", "dismissed"):
+            if state.startswith("succ"):
+                return await job_results.fn(job_id)
+            return {"error": f"Job terminato con stato '{state}'", "status": status}
+        await asyncio.sleep(poll_seconds)
+        waited += poll_seconds
+
+    return {"error": f"Timeout dopo {timeout_seconds}s", "job_id": job_id}
 
 
 if __name__ == "__main__":

@@ -1,8 +1,28 @@
 # SaferPlaces MCP Server
 
-Server MCP che espone le REST API di [SaferPlaces](https://api.saferplaces.co) come tool utilizzabili da Claude, per lanciare e monitorare simulazioni direttamente dalla chat.
+Server MCP che espone i processi di simulazione delle REST API di [SaferPlaces](https://api.saferplaces.co) come tool utilizzabili da Claude, per lanciare e monitorare simulazioni direttamente dalla chat.
 
-I tool vengono generati automaticamente all'avvio a partire dalla specifica OpenAPI (`https://api.saferplaces.co/openapi?f=json`). Le credenziali (utente e token) vengono iniettate dal server nel body di ogni richiesta di scrittura: non passano mai per la chat e Claude non le vede.
+Processi supportati (descrizioni lette live dal server, nei formati `f=json` e `f=jsonld`):
+
+- `untrim-process` — modello UNTRIM, water depth da pioggia e DEM
+- `digital-twin-process` — preparazione DEM (edifici, land use, extrusion, seamask)
+- `terra-twin-process`
+
+Per aggiungere un processo basta inserire il suo id in `PROCESS_IDS` (e nel `Literal` associato) in cima a `saferplaces_mcp.py`.
+
+Le credenziali (utente e token) vengono iniettate dal server nel body di ogni richiesta di esecuzione: non passano mai per la chat e Claude non le vede. I nomi dei campi (`user` e `token`, dentro `inputs`) sono verificati sulla descrizione live dei processi.
+
+## Tool esposti
+
+| Tool                   | Cosa fa                                                              |
+|------------------------|----------------------------------------------------------------------|
+| `list_processes`       | Elenco dei processi disponibili sull'API                             |
+| `process_describe`     | Descrizione di un processo e dei suoi input (formato json o jsonld)  |
+| `process_execute`      | Lancia un processo (asincrono di default, sincrono su richiesta)     |
+| `job_status`           | Stato di un job (accepted / running / successful / failed)           |
+| `job_results`          | Risultati di un job completato                                       |
+| `list_jobs`            | Elenco dei job recenti                                               |
+| `process_run_and_wait` | Lancia un processo e attende il completamento (polling)              |
 
 ## Struttura del repo
 
@@ -85,4 +105,4 @@ Imposta `SAFERPLACES_USER`, `SAFERPLACES_TOKEN` e (se richiesto dalla piattaform
 - **`ModuleNotFoundError: httpx` / `fastmcp`** → le dipendenze non sono installate nell'ambiente Python attivo: `pip install -r requirements.txt`.
 - **Errore all'avvio su variabili d'ambiente** → `SAFERPLACES_USER` o `SAFERPLACES_TOKEN` non impostate.
 - **Errore di autenticazione dalle API** → controlla `USER_FIELD`, `TOKEN_FIELD` e `CREDENTIALS_INSIDE_INPUTS` in cima a `saferplaces_mcp.py`: devono rispecchiare il body di una chiamata funzionante fatta a mano.
-- **Timeout su simulazioni lunghe** → il timeout del client è 300 s, alzalo in `build_server()` se necessario.
+- **Timeout su simulazioni lunghe** → per `untrim_run_and_wait` alza `timeout_seconds`; il timeout delle singole richieste HTTP (300 s) si regola nella creazione del client httpx.
