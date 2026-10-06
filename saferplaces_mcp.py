@@ -141,11 +141,18 @@ async def process_execute(
     del job da monitorare con job_status; con False attende e restituisce
     direttamente il risultato (solo per esecuzioni brevi)."""
     headers = {"Prefer": "respond-async"} if async_execution else {}
-    r = await client.post(
-        f"/processes/{process_id}/execution",
-        json={"inputs": inputs},
-        headers=headers,
-    )
+    try:
+        r = await client.post(
+            f"/processes/{process_id}/execution",
+            json={"inputs": inputs},
+            headers=headers,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"process_execute({process_id!r}) fallita: tipo(inputs)={type(inputs).__name__}, "
+            f"chiavi={list(inputs.keys()) if isinstance(inputs, dict) else inputs!r} — "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
     r.raise_for_status()
     out: dict = r.json() if r.content else {}
     location = r.headers.get("Location")
