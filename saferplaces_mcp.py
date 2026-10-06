@@ -185,6 +185,14 @@ async def job_results(job_id: str) -> dict:
 
 
 @mcp.tool
+async def job_cancel(job_id: str) -> dict:
+    """Annulla/ferma un job in corso (dismiss, standard OGC API Processes)."""
+    r = await client.delete(f"/jobs/{job_id}", params={"f": "json"})
+    r.raise_for_status()
+    return r.json() if r.content else {"status": "dismissed", "job_id": job_id}
+
+
+@mcp.tool
 async def list_jobs(limit: int = 10) -> dict:
     """Elenco dei job recenti sull'API, con stato e id."""
     r = await client.get("/jobs", params={"limit": limit, "f": "json"})
