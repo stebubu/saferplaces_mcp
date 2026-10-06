@@ -154,7 +154,10 @@ async def process_execute(
             f"{type(exc).__name__}: {exc}"
         ) from exc
     r.raise_for_status()
-    out: dict = r.json() if r.content else {}
+    raw = r.json() if r.content else None
+    out: dict = raw if isinstance(raw, dict) else {}
+    if raw is not None and not isinstance(raw, dict):
+        out["raw_response"] = raw
     location = r.headers.get("Location")
     if location:
         out.setdefault("job_location", location)
