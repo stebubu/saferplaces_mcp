@@ -48,6 +48,36 @@ ProcessId = Literal[
     "safer-coast-process",
 ]
 
+# Dataset DEM/DTM preferito per paese/regione, usato da digital-twin-process
+# quando si passa "country" invece di (o oltre a) "dem_dataset" esplicito.
+# Fonte: regole region-aware documentate nello schema upstream del processo
+# (campo dem_dataset), aggiornare qui se cambia la lista a monte.
+DEM_DATASET_BY_COUNTRY = {
+    "italy": "GECOSISTEMA/ITALY",
+    "netherlands": "AHN/NETHERLANDS/05M",
+    "belgium": "GECOSISTEMA/BELGIUM/1M",
+    "flanders": "VLAANDEREN/FLANDERS/BE/1M",
+    "belgium_flanders": "VLAANDEREN/FLANDERS/BE/1M",
+    "wallonia": "GEOPORTAIL/WALLONIE/BE/1M",
+    "belgium_wallonia": "GEOPORTAIL/WALLONIE/BE/1M",
+    "france": "IGN/RGE_ALTI/1M",
+    "spain": "IGN/ES/2M",
+    "uk": "UK/LIDAR",
+    "united kingdom": "UK/LIDAR",
+    "denmark": "DK-DEM",
+    "norway": "NO/KARTVERKET",
+    "switzerland": "SWISSALTI3D/SWISS",
+    "australia": "AU/GA/AUSTRALIA_5M_DEM",
+    "new zealand": "NZ/LINZ",
+    "canada": "NRCAN/CANADA/2M",
+    "usa": "USGS/3DEP/1M",
+    "united states": "USGS/3DEP/1M",
+    "mexico": "MX/LIDAR",
+    "angola": "AIRBUS/ANGOLA",
+    "europe": "COPERNICUS/EUDEM",
+    "global": "NASA/NASADEM_HGT/001",
+}
+
 USER = os.environ.get("SAFERPLACES_USER")
 TOKEN = os.environ.get("SAFERPLACES_TOKEN")
 if not USER or not TOKEN:
@@ -141,7 +171,19 @@ async def process_execute(
     del processo (vedi process_describe): NON includere user e token, li
     aggiunge il server. Con async_execution=True (default) la risposta
     contiene l'id del job da monitorare con job_status; con False attende e
-    restituisce direttamente il risultato (solo per esecuzioni brevi)."""
+    restituisce direttamente il risultato (solo per esecuzioni brevi).
+
+    Per digital-twin-process: se non passi "dem_dataset", puoi passare
+    "country" (es. "France", "Italy", "USA" — case-insensitive) per farlo
+    risolvere automaticamente al dataset DEM nazionale più adatto (vedi
+    DEM_DATASET_BY_COUNTRY in cima al file). "country" non viene inoltrato
+    all'API, solo "dem_dataset" risolto."""
+    if process_id == "digital-twin-process":
+        country = params.pop("country", None)
+        if country and "dem_dataset" not in params:
+            dataset = DEM_DATASET_BY_COUNTRY.get(country.strip().lower())
+            if dataset:
+                params["dem_dataset"] = dataset
     headers = {"Prefer": "respond-async"} if async_execution else {}
     try:
         r = await client.post(
