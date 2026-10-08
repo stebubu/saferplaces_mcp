@@ -40,12 +40,14 @@ PROCESS_IDS = [
     "digital-twin-process",
     "terra-twin-process",
     "safer-coast-process",
+    "safer-buildings-process",
 ]
 ProcessId = Literal[
     "untrim-process",
     "digital-twin-process",
     "terra-twin-process",
     "safer-coast-process",
+    "safer-buildings-process",
 ]
 
 # Dataset DEM/DTM preferito per paese/regione, usato da digital-twin-process
